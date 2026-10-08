@@ -3,9 +3,11 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{CLICK_DELAY, COMPLETE_WAIT, END_SCAN, SCAN_POLL, TELEPORT_DELAY};
+use crate::config::{
+    CLICK_DELAY, COMPLETE_WAIT, END_SCAN, SCAN_POLL, TELEPORT_DELAY, ZOOM_OUT_PAUSE,
+};
 use crate::gpx::{self, GpxRoute};
-use crate::mock_location::{stop, teleport_route_waypoints, teleport_to};
+use crate::mock_location::{ensure_zoomed_out, stop, teleport_route_waypoints, teleport_to};
 use crate::popup::Icon;
 use crate::ui::{self, Button};
 use crate::{Frame, Point, capture, find_cell, tap};
@@ -34,6 +36,7 @@ pub enum Action {
     ScanEnd,
     Tap(Point),
     CheckMenu,
+    ZoomOut,
     Stop,
     Exit,
 }
@@ -132,12 +135,17 @@ impl Bot {
         if self.cells >= CELL_GOAL || self.index >= self.routes.len() {
             return self.finish();
         }
+        let zoom_out = self.index == 0;
         let route = self.routes[self.index].clone();
         self.index += 1;
         self.waypoints = route.points;
         self.menu_retries = 0;
         self.state = State::StartRoute;
-        vec![
+        let mut actions = Vec::new();
+        if zoom_out {
+            actions.extend([Action::ZoomOut, Action::Wait(ZOOM_OUT_PAUSE)]);
+        }
+        actions.extend([
             Action::Teleport {
                 lat: route.start_lat,
                 lon: route.start_lon,
@@ -153,7 +161,8 @@ impl Bot {
             Action::Wait(CLICK_DELAY),
             Action::Press(Button::Follow),
             Action::Wait(CLICK_DELAY),
-        ]
+        ]);
+        actions
     }
 
     fn begin_complete(&mut self) -> Vec<Action> {
@@ -233,6 +242,7 @@ pub fn run_routes(dir: &Path) -> io::Result<()> {
                     let frame = load_shot(shot)?;
                     next.extend(bot.on_menu(ui::action_menu_visible(&menu_icon, &frame)));
                 }
+                Action::ZoomOut => ensure_zoomed_out()?,
                 Action::Stop => stop()?,
                 Action::Exit => return Ok(()),
             }
@@ -311,7 +321,9 @@ mod tests {
     fn starts_the_route_before_teleporting() {
         let points = vec![(48.5, 11.25), (48.6, 11.3)];
         let mut bot = Bot::new(vec![route_points("a.gpx", points.clone())]);
-        assert_eq!(bot.start(), start_clicks(48.5, 11.25));
+        let mut expected = vec![Action::ZoomOut, Action::Wait(ZOOM_OUT_PAUSE)];
+        expected.extend(start_clicks(48.5, 11.25));
+        assert_eq!(bot.start(), expected);
         assert_eq!(bot.state(), State::StartRoute);
         assert_eq!(bot.route_opened(), vec![Action::TeleportWaypoints(points)]);
         assert_eq!(bot.state(), State::TeleportingRoute);

@@ -20,13 +20,15 @@ pub use config::{
     GLOW_SAT_MIN, GLOW_VAL_MIN, ICON_ALPHA_MIN, MATCH_MIN_SIDE, MATCH_MIN_SIMILARITY, MATCH_SCALES,
     MATCH_TOP, MATCH_WORK_WIDTH, OCR_GLYPH_GAP, OCR_MAX_MISS, POKEMON_MENU_BTN, POPUP_GOAL,
     POPUP_POLL, POPUP_WINDOW, ROI_HEIGHT_PCT, ROI_WIDTH_PCT, ROUTES_TAB, Rect, RelativeTarget,
-    SCAN_POLL, SEE_NEARBY_ROUTES_BTN, TELEPORT_DELAY, WALK_POLL, WAYPOINT_PAUSE,
+    SCAN_POLL, SEE_NEARBY_ROUTES_BTN, TELEPORT_DELAY, WALK_POLL, WAYPOINT_PAUSE, ZOOM_OUT_PAUSE,
 };
 pub use detection::{Frame, Point, find_cell};
 pub use gpx::{GpxRoute, load_routes};
 pub use input::tap;
 pub use locate::{Hit, locate};
-pub use mock_location::{load_and_start_gpx, stop, teleport_route_waypoints, teleport_to};
+pub use mock_location::{
+    ensure_zoomed_out, load_and_start_gpx, stop, teleport_route_waypoints, teleport_to,
+};
 pub use ocr::find_text_in_region;
 pub use popup::{Icon, Route, shows_cell_popup};
 pub use template::Template;

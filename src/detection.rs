@@ -17,6 +17,10 @@ const NEIGHBORS: [(isize, isize); 8] = [
     (1, 1),
 ];
 
+const PLAYER_X_PCT: f32 = 0.50;
+const PLAYER_Y_PCT: f32 = 0.65;
+const PLAYER_RADIUS_PCT: f32 = 0.14;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Point {
     pub x: u32,
@@ -63,8 +67,20 @@ pub fn find_cell(frame: &Frame) -> Option<Point> {
         return None;
     }
 
+    let x_player = frame.width as f32 * PLAYER_X_PCT;
+    let y_player = frame.height as f32 * PLAYER_Y_PCT;
+    let radius = frame.height as f32 * PLAYER_RADIUS_PCT;
+    let radius_sq = radius * radius;
+
     let mut value = vec![0u8; width * height];
     for i in 0..value.len() {
+        let x = (i % width) as f32;
+        let y = (i / width) as f32;
+        let dx = x - x_player;
+        let dy = y - y_player;
+        if dx * dx + dy * dy > radius_sq {
+            continue;
+        }
         let pixel = i * 3;
         let (hue, saturation, brightness) = rgb_to_hsv(
             frame.pixels[pixel],
@@ -180,20 +196,69 @@ mod tests {
             height: 150,
             pixels: vec![0; 150 * 150 * 3],
         };
-        for y in 0..140 {
+        for y in 0..40 {
             for x in 0..frame.width {
                 paint(&mut frame, x, y, [0, 255, 0]);
             }
         }
-        paint(&mut frame, 0, 142, [0, 255, 0]);
-        paint(&mut frame, 21, 144, [0, 80, 0]);
-        for y in 145..149 {
-            for x in 20..24 {
+        paint(&mut frame, 75, 80, [0, 255, 0]);
+        paint(&mut frame, 90, 100, [0, 80, 0]);
+        for y in 96..100 {
+            for x in 74..78 {
                 paint(&mut frame, x, y, [0, 255, 0]);
             }
         }
 
         let point = find_cell(&frame).unwrap();
-        assert_eq!((point.x, point.y), (22, 147));
+        assert_eq!((point.x, point.y), (76, 98));
+    }
+
+    #[test]
+    fn ignores_neon_glow_outside_the_player_radius() {
+        let width = 100;
+        let height = 100;
+        let x_player = width as f32 * 0.50;
+        let y_player = height as f32 * 0.65;
+        let radius = height as f32 * 0.14;
+        let radius_sq = radius * radius;
+        let outside = |x: u32, y: u32| {
+            let dx = x as f32 - x_player;
+            let dy = y as f32 - y_player;
+            dx * dx + dy * dy > radius_sq
+        };
+
+        let mut frame = Frame {
+            width,
+            height,
+            pixels: vec![0; (width * height * 3) as usize],
+        };
+        for y in 63..69 {
+            for x in 70..76 {
+                assert!(outside(x, y));
+                paint(&mut frame, x, y, [0, 255, 0]);
+            }
+        }
+        for y in 64..68 {
+            for x in 49..53 {
+                assert!(!outside(x, y));
+                paint(&mut frame, x, y, [0, 255, 0]);
+            }
+        }
+
+        let point = find_cell(&frame).unwrap();
+        assert_eq!((point.x, point.y), (51, 66));
+        assert!(!outside(point.x, point.y));
+
+        let mut outside_only = Frame {
+            width,
+            height,
+            pixels: vec![0; (width * height * 3) as usize],
+        };
+        for y in 63..69 {
+            for x in 70..76 {
+                paint(&mut outside_only, x, y, [0, 255, 0]);
+            }
+        }
+        assert_eq!(find_cell(&outside_only), None);
     }
 }
