@@ -208,7 +208,11 @@ pub fn run_routes(dir: &Path) -> io::Result<()> {
 fn press(shot: &Path, button: Button) -> io::Result<()> {
     capture(shot)?;
     let frame = load_shot(shot)?;
-    let point = ui::point(button, frame.width, frame.height);
+    let spot = ui::target(button);
+    let point = ui::labels(button).iter().find_map(|label| {
+        crate::ocr::find_text_in_region(&frame, label, spot.roi(frame.width, frame.height))
+    });
+    let point = point.unwrap_or_else(|| ui::point(button, frame.width, frame.height));
     println!("{} {}", point.x, point.y);
     tap(&point)?;
     thread::sleep(MENU_PAUSE);
