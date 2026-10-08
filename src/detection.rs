@@ -18,6 +18,7 @@ const NEIGHBORS: [(isize, isize); 8] = [
     (1, 1),
 ];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Point {
     pub x: u32,
     pub y: u32,

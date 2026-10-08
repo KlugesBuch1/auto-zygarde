@@ -9,17 +9,27 @@ const SHOT: &str = "data/frame.png";
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
     let Some(first) = args.next() else {
-        eprintln!("usage: auto-zygarde <frame|capture|watch> [tap]");
+        eprintln!("usage: auto-zygarde <frame|capture|watch|routes> [tap]");
         return ExitCode::from(2);
     };
     let do_tap = match args.next() {
         None => false,
         Some(arg) if arg == "tap" => true,
         Some(_) => {
-            eprintln!("usage: auto-zygarde <frame|capture|watch> [tap]");
+            eprintln!("usage: auto-zygarde <frame|capture|watch|routes> [tap]");
             return ExitCode::from(2);
         }
     };
+
+    if first == "routes" {
+        return match auto_zygarde::run_routes(Path::new("assets/gpx")) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(err) => {
+                eprintln!("{err}");
+                ExitCode::FAILURE
+            }
+        };
+    }
 
     if first == "watch" {
         return watch(do_tap);
