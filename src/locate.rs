@@ -27,14 +27,24 @@ fn view(template: &Template, frame: &Template) -> Option<View> {
     Some(View { tw, th, fw, fh })
 }
 
-fn sad_at(template: &Template, frame: &Template, view: &View, x: usize, y: usize) -> u64 {
+fn sad_at(
+    template: &Template,
+    frame: &Template,
+    view: &View,
+    x: usize,
+    y: usize,
+    opaque: Option<&[bool]>,
+) -> u64 {
     let mut sad = 0u64;
     for ty in 0..view.th {
         let frame_row = (y + ty) * view.fw + x;
         let template_row = ty * view.tw;
         for tx in 0..view.tw {
-            let diff =
-                template.pixels[template_row + tx] as i16 - frame.pixels[frame_row + tx] as i16;
+            let index = template_row + tx;
+            if opaque.is_some_and(|opaque| !opaque[index]) {
+                continue;
+            }
+            let diff = template.pixels[index] as i16 - frame.pixels[frame_row + tx] as i16;
             sad += diff.unsigned_abs() as u64;
         }
     }
@@ -53,7 +63,7 @@ pub fn locate(template: &Template, frame: &Template, min_similarity: f32) -> Opt
 
     for y in 0..=(view.fh - view.th) {
         for x in 0..=(view.fw - view.tw) {
-            let sad = sad_at(template, frame, &view, x, y);
+            let sad = sad_at(template, frame, &view, x, y, None);
             if sad < best_sad {
                 best_sad = sad;
                 best_x = x as u32;
@@ -70,6 +80,53 @@ pub fn locate(template: &Template, frame: &Template, min_similarity: f32) -> Opt
     }
 
     let score = similarity(best_sad, view.tw * view.th);
+    if score < min_similarity.clamp(0.0, 1.0) {
+        return None;
+    }
+    Some(Hit {
+        x: best_x,
+        y: best_y,
+        similarity: score,
+    })
+}
+
+pub(crate) fn locate_opaque(
+    template: &Template,
+    frame: &Template,
+    opaque: &[bool],
+    min_similarity: f32,
+) -> Option<Hit> {
+    let view = view(template, frame)?;
+    if opaque.len() != template.pixels.len() {
+        return None;
+    }
+    let covered = opaque.iter().filter(|pixel| **pixel).count();
+    if covered == 0 {
+        return None;
+    }
+    let mut best_sad = u64::MAX;
+    let mut best_x = 0u32;
+    let mut best_y = 0u32;
+
+    for y in 0..=(view.fh - view.th) {
+        for x in 0..=(view.fw - view.tw) {
+            let sad = sad_at(template, frame, &view, x, y, Some(opaque));
+            if sad < best_sad {
+                best_sad = sad;
+                best_x = x as u32;
+                best_y = y as u32;
+                if sad == 0 {
+                    return Some(Hit {
+                        x: best_x,
+                        y: best_y,
+                        similarity: 1.0,
+                    });
+                }
+            }
+        }
+    }
+
+    let score = similarity(best_sad, covered);
     if score < min_similarity.clamp(0.0, 1.0) {
         return None;
     }
