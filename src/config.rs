@@ -89,6 +89,10 @@ pub const ACTION_MENU_BTN: RelativeTarget = RelativeTarget {
     x_pct: 0.50,
     y_pct: 0.914,
 };
+pub const OPEN_PROMPT_BTN: RelativeTarget = RelativeTarget {
+    x_pct: 0.50,
+    y_pct: 0.633,
+};
 
 impl RelativeTarget {
     pub fn to_absolute(&self, screen_width: u32, screen_height: u32) -> (u32, u32) {

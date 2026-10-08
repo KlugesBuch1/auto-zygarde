@@ -39,7 +39,7 @@ class BotService : Service() {
         }
         stopRequested.set(false)
         BotRuntime.setRunning(true)
-        val notice = notification("Startet…")
+        val notice = notification("Starting…")
         if (Build.VERSION.SDK_INT >= 34) {
             startForeground(
                 NOTIFICATION_ID,
@@ -53,7 +53,7 @@ class BotService : Service() {
             try {
                 runBot()
             } catch (_: InterruptedException) {
-                BotRuntime.line("Stopp.")
+                BotRuntime.line("Stopped.")
             } catch (err: Exception) {
                 BotRuntime.line(err.message ?: err.toString())
             } finally {
@@ -69,18 +69,18 @@ class BotService : Service() {
         if (stopRequested.get()) {
             return
         }
-        BotRuntime.line("Prüfe Root…")
-        update("Warte auf Magisk…")
+        BotRuntime.line("Checking root…")
+        update("Waiting for Magisk…")
         val id = runSu("id")
         if (id.code != 0 || !id.text.contains("uid=0")) {
-            BotRuntime.line(id.text.ifBlank { "Root fehlt. In Magisk erlauben." })
+            BotRuntime.line(id.text.ifBlank { "Root missing. Allow it in Magisk." })
             return
         }
         BotRuntime.line(id.text.trim())
 
         val launch = packageManager.getLaunchIntentForPackage(POKEMON_GO)
         if (launch == null) {
-            BotRuntime.line("Pokémon GO ist nicht installiert.")
+            BotRuntime.line("Pokémon GO is not installed.")
             return
         }
 
@@ -92,14 +92,14 @@ class BotService : Service() {
             return
         }
         keepScreenOn()
-        BotRuntime.line("Starte Pokémon GO.")
-        update("Starte Pokémon GO")
+        BotRuntime.line("Opening Pokémon GO.")
+        update("Opening Pokémon GO")
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         startActivity(launch)
         waitForMap()
 
-        BotRuntime.line("Starte den Bot.")
-        update("Bot läuft")
+        BotRuntime.line("Starting the bot.")
+        update("Bot running")
         val shell = ProcessBuilder(
             "su",
             "-c",
@@ -112,29 +112,29 @@ class BotService : Service() {
             }
         }
         val code = shell.waitFor()
-        BotRuntime.line("Bot beendet ($code).")
-        update(if (code == 0) "Fertig" else "Beendet ($code)")
+        BotRuntime.line("Bot exited ($code).")
+        update(if (code == 0) "Done" else "Exited ($code)")
     }
 
     private fun prepareFiles() {
-        BotRuntime.line("Kopiere Bot und Routen.")
+        BotRuntime.line("Copying the bot and routes.")
         val made = runSu("mkdir -p $HOME/assets/gpx $HOME/assets/templates $HOME/data")
         if (made.code != 0) {
-            error(made.text.ifBlank { "Arbeitsordner konnte nicht angelegt werden." })
+            error(made.text.ifBlank { "Could not create the working directory." })
         }
         copyAssetDir("gpx", "$HOME/assets/gpx")
         copyAssetDir("templates", "$HOME/assets/templates")
         assets.open("bin/auto-zygarde").use { suWrite(BINARY, it) }
         val mode = runSu("chmod 755 $BINARY")
         if (mode.code != 0) {
-            error(mode.text.ifBlank { "Bot-Binary ist nicht ausführbar." })
+            error(mode.text.ifBlank { "Bot binary is not executable." })
         }
     }
 
     private fun copyAssetDir(assetDir: String, destDir: String) {
         val names = assets.list(assetDir) ?: emptyArray()
         if (names.isEmpty()) {
-            error("Asset $assetDir fehlt in der APK.")
+            error("Asset $assetDir is missing from the APK.")
         }
         for (name in names) {
             assets.open("$assetDir/$name").use { suWrite("$destDir/$name", it) }
@@ -149,7 +149,7 @@ class BotService : Service() {
         stayOn = current.text.trim().let { if (it.isEmpty() || it == "null") "0" else it }
         runSu("svc power stayon true")
         runSu("input keyevent 224")
-        BotRuntime.line("Bildschirm bleibt an.")
+        BotRuntime.line("Screen will stay on.")
     }
 
     private fun restoreScreen() {
@@ -167,14 +167,14 @@ class BotService : Service() {
                     (line.contains("topResumedActivity") || line.contains("mResumedActivity"))
             }
             if (onMap) {
-                BotRuntime.line("Pokémon GO ist vorn. Warte auf die Karte.")
-                update("Warte auf die Karte")
+                BotRuntime.line("Pokémon GO is in front. Waiting for the map.")
+                update("Waiting for the map")
                 Thread.sleep(20_000)
                 return
             }
             Thread.sleep(1_000)
         }
-        BotRuntime.line("Pokémon GO nicht als vorderste App erkannt. Der Bot startet trotzdem.")
+        BotRuntime.line("Pokémon GO was not the front app. Starting the bot anyway.")
     }
 
     private fun stopBot() {

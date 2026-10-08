@@ -1,7 +1,7 @@
 use crate::config::{
     ACTION_MENU_BAND, ACTION_MENU_BTN, ACTIVE_ROUTE_ICON, CANCEL_ROUTE_COMPLETION,
-    COMPLETE_ROUTE_BTN, FIRST_ROUTE_ENTRY, FOLLOW_ROUTE_BTN, POKEMON_MENU_BTN, ROUTES_TAB,
-    RelativeTarget, SEE_NEARBY_ROUTES_BTN,
+    COMPLETE_ROUTE_BTN, FIRST_ROUTE_ENTRY, FOLLOW_ROUTE_BTN, OPEN_PROMPT_BTN, POKEMON_MENU_BTN,
+    ROUTES_TAB, RelativeTarget, SEE_NEARBY_ROUTES_BTN,
 };
 use crate::popup::{self, Icon};
 use crate::{Frame, Point};
@@ -16,6 +16,7 @@ pub enum Button {
     ActiveRoute,
     Complete,
     CancelCompletion,
+    OpenPrompt,
 }
 
 pub fn target(button: Button) -> RelativeTarget {
@@ -28,6 +29,7 @@ pub fn target(button: Button) -> RelativeTarget {
         Button::ActiveRoute => ACTIVE_ROUTE_ICON,
         Button::Complete => COMPLETE_ROUTE_BTN,
         Button::CancelCompletion => CANCEL_ROUTE_COMPLETION,
+        Button::OpenPrompt => OPEN_PROMPT_BTN,
     }
 }
 

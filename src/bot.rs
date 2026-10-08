@@ -144,7 +144,12 @@ impl Bot {
         self.state = State::StartRoute;
         let mut actions = Vec::new();
         if zoom_out {
-            actions.extend([Action::ZoomOut, Action::Wait(ZOOM_OUT_PAUSE)]);
+            actions.extend([
+                Action::Press(Button::OpenPrompt),
+                Action::Wait(CLICK_DELAY),
+                Action::ZoomOut,
+                Action::Wait(ZOOM_OUT_PAUSE),
+            ]);
         }
         actions.extend([
             Action::Teleport {
@@ -331,7 +336,12 @@ mod tests {
     fn starts_the_route_before_teleporting() {
         let points = vec![(48.5, 11.25), (48.6, 11.3)];
         let mut bot = Bot::new(vec![route_points("a.gpx", points.clone())]);
-        let mut expected = vec![Action::ZoomOut, Action::Wait(ZOOM_OUT_PAUSE)];
+        let mut expected = vec![
+            Action::Press(Button::OpenPrompt),
+            Action::Wait(CLICK_DELAY),
+            Action::ZoomOut,
+            Action::Wait(ZOOM_OUT_PAUSE),
+        ];
         expected.extend(start_clicks(48.5, 11.25));
         assert_eq!(bot.start(), expected);
         assert_eq!(bot.state(), State::StartRoute);

@@ -7,8 +7,17 @@ use std::time::Duration;
 use crate::config::WAYPOINT_PAUSE;
 use crate::gpx::{self, GpxRoute};
 
+const FOCUS_PAUSE: Duration = Duration::from_millis(400);
+const POKEMON_GO: &str = "com.nianticlabs.pokemongo";
+
 pub fn teleport_to(lat: f64, lon: f64) -> io::Result<()> {
-    finish(teleport_command(lat, lon), "teleport")
+    finish(teleport_command(lat, lon), "teleport")?;
+    thread::sleep(FOCUS_PAUSE);
+    show_pokemon_go()
+}
+
+pub fn show_pokemon_go() -> io::Result<()> {
+    finish(show_pokemon_go_command(), "pokemon go")
 }
 
 pub fn teleport_route_waypoints(waypoints: &[(f64, f64)]) -> io::Result<()> {
@@ -226,6 +235,20 @@ fn stop_command() -> Command {
     command
 }
 
+fn show_pokemon_go_command() -> Command {
+    let mut command = Command::new("am");
+    command.args([
+        "start",
+        "--activity-single-top",
+        "-a",
+        "android.intent.action.MAIN",
+        "-c",
+        "android.intent.category.LAUNCHER",
+        POKEMON_GO,
+    ]);
+    command
+}
+
 fn finish(mut command: Command, name: &str) -> io::Result<()> {
     let status = command.status()?;
     if status.success() {
@@ -269,6 +292,25 @@ mod tests {
             .collect();
         assert_eq!(args[2], "theappninjas.gpsjoystick.WALK");
         assert_eq!(args[5], "48.500000,11.250000;48.750000,11.500000");
+    }
+
+    #[test]
+    fn show_pokemon_go_command_reopens_the_game() {
+        let command = show_pokemon_go_command();
+        assert_eq!(command.get_program(), "am");
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                "start",
+                "--activity-single-top",
+                "-a",
+                "android.intent.action.MAIN",
+                "-c",
+                "android.intent.category.LAUNCHER",
+                "com.nianticlabs.pokemongo",
+            ]
+            .map(std::ffi::OsStr::new)
+        );
     }
 
     #[test]

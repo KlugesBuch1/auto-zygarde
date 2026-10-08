@@ -17,7 +17,7 @@ fun runSu(command: String, timeoutSec: Long = 120): SuResult {
     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
         process.destroyForcibly()
         reader.join(1000)
-        return SuResult(124, output.toString().ifBlank { "su Zeitüberschreitung" })
+        return SuResult(124, output.toString().ifBlank { "su timed out" })
     }
     reader.join()
     return SuResult(process.exitValue(), output.toString())
@@ -32,10 +32,10 @@ fun suWrite(dest: String, input: InputStream) {
     process.outputStream.use { output -> input.copyTo(output) }
     if (!process.waitFor(120, TimeUnit.SECONDS)) {
         process.destroyForcibly()
-        error("Schreiben nach $dest hat zu lange gedauert")
+        error("Timed out writing $dest")
     }
     reader.join(1000)
     if (process.exitValue() != 0) {
-        error(errors.toString().ifBlank { "Schreiben nach $dest fehlgeschlagen (${process.exitValue()})" })
+        error(errors.toString().ifBlank { "Failed to write $dest (${process.exitValue()})" })
     }
 }
