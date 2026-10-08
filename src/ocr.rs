@@ -1,12 +1,6 @@
+pub use crate::config::Rect;
+use crate::config::{OCR_GLYPH_GAP, OCR_MAX_MISS};
 use crate::{Frame, Point};
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Rect {
-    pub x: u32,
-    pub y: u32,
-    pub width: u32,
-    pub height: u32,
-}
 
 pub fn find_text_in_region(frame: &Frame, target_text: &str, region: Rect) -> Option<Point> {
     let binary = binarize(frame, region)?;
@@ -127,7 +121,7 @@ fn read_glyphs(binary: &Binary) -> String {
             x += 1;
             continue;
         }
-        if gap >= 6 && !text.is_empty() {
+        if gap >= OCR_GLYPH_GAP && !text.is_empty() {
             text.push(' ');
         }
         gap = 0;
@@ -175,7 +169,11 @@ fn match_glyph(binary: &Binary, x0: usize, x1: usize) -> Option<char> {
             best = Some(ch);
         }
     }
-    if best_miss <= 4 { best } else { None }
+    if best_miss <= OCR_MAX_MISS {
+        best
+    } else {
+        None
+    }
 }
 
 fn sample(binary: &Binary, x0: usize, x1: usize, y0: usize, y1: usize) -> [bool; 35] {

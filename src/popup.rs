@@ -1,20 +1,13 @@
 use std::path::Path;
-use std::time::Duration;
 
 use image::imageops::FilterType;
 
+use crate::config::{
+    ICON_ALPHA_MIN, MATCH_MIN_SIDE, MATCH_MIN_SIMILARITY, MATCH_SCALES, MATCH_TOP,
+    MATCH_WORK_WIDTH, POPUP_GOAL,
+};
 use crate::locate::locate_opaque;
 use crate::{Frame, Template};
-
-pub const POPUP_GOAL: u32 = 3;
-pub const POPUP_WINDOW: Duration = Duration::from_secs(2);
-pub const POPUP_POLL: Duration = Duration::from_millis(400);
-
-const SCALES: [f32; 4] = [0.35, 0.5, 0.75, 1.0];
-const TOP: f32 = 0.35;
-const WORK_WIDTH: u32 = 180;
-const MIN_SIDE: u32 = 8;
-const MIN_SIMILARITY: f32 = 0.8;
 
 pub struct Icon {
     width: u32,
@@ -55,14 +48,14 @@ impl Route {
 }
 
 pub fn shows_cell_popup(icon: &Icon, frame: &Frame) -> bool {
-    shows_icon_rows(icon, frame, 0.0, TOP)
+    shows_icon_rows(icon, frame, 0.0, MATCH_TOP)
 }
 
 pub fn shows_icon_rows(icon: &Icon, frame: &Frame, from_y: f32, to_y: f32) -> bool {
     let Some(band) = band_luma(frame, from_y, to_y) else {
         return false;
     };
-    matches(icon, &band, &SCALES, MIN_SIMILARITY)
+    matches(icon, &band, &MATCH_SCALES, MATCH_MIN_SIMILARITY)
 }
 
 fn band_luma(frame: &Frame, from_y: f32, to_y: f32) -> Option<Template> {
@@ -100,7 +93,11 @@ fn matches(icon: &Icon, band: &Template, scales: &[f32], min_similarity: f32) ->
     for scale in scales {
         let width = ((icon.width as f32) * scale * ratio).round() as u32;
         let height = ((icon.height as f32) * scale * ratio).round() as u32;
-        if width < MIN_SIDE || height < MIN_SIDE || width > band.width || height > band.height {
+        if width < MATCH_MIN_SIDE
+            || height < MATCH_MIN_SIDE
+            || width > band.width
+            || height > band.height
+        {
             continue;
         }
         let Some((needle, opaque)) = scale_icon(icon, width, height) else {
@@ -123,7 +120,7 @@ fn scale_icon(icon: &Icon, width: u32, height: u32) -> Option<(Template, Vec<boo
     let mut opaque = Vec::with_capacity((width * height) as usize);
     for pixel in out.pixels() {
         pixels.push(luma(pixel[0], pixel[1], pixel[2]));
-        opaque.push(pixel[3] >= 128);
+        opaque.push(pixel[3] >= ICON_ALPHA_MIN);
     }
     Some((
         Template {
@@ -140,7 +137,7 @@ fn luma(r: u8, g: u8, b: u8) -> u8 {
 }
 
 fn fit_band(band: &Template) -> Option<(Template, f32)> {
-    if band.width <= WORK_WIDTH {
+    if band.width <= MATCH_WORK_WIDTH {
         return Some((
             Template {
                 width: band.width,
@@ -150,9 +147,9 @@ fn fit_band(band: &Template) -> Option<(Template, f32)> {
             1.0,
         ));
     }
-    let ratio = WORK_WIDTH as f32 / band.width as f32;
+    let ratio = MATCH_WORK_WIDTH as f32 / band.width as f32;
     let height = ((band.height as f32) * ratio).round().max(1.0) as u32;
-    Some((resize(band, WORK_WIDTH, height)?, ratio))
+    Some((resize(band, MATCH_WORK_WIDTH, height)?, ratio))
 }
 
 fn resize(src: &Template, width: u32, height: u32) -> Option<Template> {
@@ -299,6 +296,6 @@ mod tests {
         assert!(!route.after_click(false));
         assert!(!route.after_click(true));
         assert!(route.after_click(true));
-        assert_eq!(route.popups(), 3);
+        assert_eq!(route.popups(), POPUP_GOAL);
     }
 }

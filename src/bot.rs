@@ -3,36 +3,40 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use crate::config::{CLICK_DELAY, COMPLETE_WAIT, END_SCAN, SCAN_POLL, TELEPORT_DELAY, WALK_POLL};
 use crate::gpx::{self, GpxRoute};
 use crate::mock_location::{
     clear_route_log, load_and_start_gpx, route_is_active, stop, teleport_to,
 };
-use crate::popup::{self, Icon, POPUP_GOAL, POPUP_POLL, POPUP_WINDOW};
+use crate::popup::Icon;
 use crate::ui::{self, Button};
 use crate::{Frame, Point, capture, find_cell, tap};
 
 const SHOT: &str = "data/frame.png";
-const MENU_PAUSE: Duration = Duration::from_millis(800);
-const MAP_SETTLE: Duration = Duration::from_secs(2);
+const CELL_GOAL: u32 = crate::config::CELL_GOAL;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum State {
     Idle,
-    StartInGameRoute,
-    Scanning,
+    StartRoute,
+    WalkingRoute,
+    ScanningAtEnd,
     Collecting,
-    CompleteInGameRoute,
+    CompletingRoute,
+    NextRoute,
     Finished,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Teleport { lat: f64, lon: f64 },
-    StartGpx(PathBuf),
+    Wait(Duration),
     Press(Button),
-    CheckMap,
-    Scan,
+    StartGpx(PathBuf),
+    Walk,
+    ScanEnd,
     Tap(Point),
+    CheckMenu,
     Stop,
     Exit,
 }
@@ -42,6 +46,8 @@ pub struct Bot {
     index: usize,
     cells: u32,
     state: State,
+    current: Option<PathBuf>,
+    menu_retries: u8,
 }
 
 impl Bot {
@@ -51,6 +57,8 @@ impl Bot {
             index: 0,
             cells: 0,
             state: State::Idle,
+            current: None,
+            menu_retries: 0,
         }
     }
 
@@ -64,141 +72,186 @@ impl Bot {
 
     pub fn start(&mut self) -> Vec<Action> {
         self.state = State::Idle;
-        self.advance()
+        self.open_route()
     }
 
-    pub fn on_frame(&mut self, cell: Option<Point>, route_active: bool) -> Vec<Action> {
-        if self.state != State::Scanning {
+    pub fn route_opened(&mut self) -> Vec<Action> {
+        if self.state != State::StartRoute {
             return Vec::new();
         }
-        if !route_active {
-            return self.begin_complete();
+        let Some(path) = self.current.clone() else {
+            return self.finish();
+        };
+        self.state = State::WalkingRoute;
+        vec![Action::StartGpx(path), Action::Walk]
+    }
+
+    pub fn on_arrived(&mut self) -> Vec<Action> {
+        if self.state != State::WalkingRoute {
+            return Vec::new();
+        }
+        self.state = State::ScanningAtEnd;
+        vec![Action::ScanEnd]
+    }
+
+    pub fn on_end_scan(&mut self, cell: Option<Point>, timed_out: bool) -> Vec<Action> {
+        if self.state != State::ScanningAtEnd {
+            return Vec::new();
         }
         if let Some(point) = cell {
             self.state = State::Collecting;
             return vec![Action::Tap(point)];
         }
-        vec![Action::Scan]
+        if timed_out {
+            return self.begin_complete();
+        }
+        vec![Action::ScanEnd]
     }
 
-    pub fn on_popup(&mut self, seen: bool) -> Vec<Action> {
+    pub fn confirm_cell(&mut self) -> Vec<Action> {
         if self.state != State::Collecting {
             return Vec::new();
         }
-        if seen {
-            self.cells += 1;
-        }
-        if self.cells >= POPUP_GOAL {
-            return self.begin_complete();
-        }
-        self.state = State::Scanning;
-        vec![Action::Scan]
+        self.cells += 1;
+        self.begin_complete()
     }
 
-    pub fn on_overworld(&mut self, map_visible: bool) -> Vec<Action> {
-        if self.state != State::CompleteInGameRoute {
+    pub fn on_menu(&mut self, menu_visible: bool) -> Vec<Action> {
+        if self.state != State::CompletingRoute {
             return Vec::new();
         }
-        if !map_visible {
-            return vec![Action::Press(Button::Dismiss), Action::CheckMap];
+        if menu_visible || self.menu_retries >= 1 {
+            return self.after_route();
         }
-        self.advance()
-    }
-
-    fn begin_complete(&mut self) -> Vec<Action> {
-        self.state = State::CompleteInGameRoute;
+        self.menu_retries += 1;
         vec![
-            Action::Stop,
-            Action::Press(Button::RouteIcon),
-            Action::Press(Button::Complete),
-            Action::CheckMap,
+            Action::Press(Button::CancelCompletion),
+            Action::Wait(CLICK_DELAY),
+            Action::CheckMenu,
         ]
     }
 
-    fn advance(&mut self) -> Vec<Action> {
-        if self.cells >= POPUP_GOAL || self.index >= self.routes.len() {
-            self.state = State::Finished;
-            return vec![Action::Stop, Action::Exit];
+    fn open_route(&mut self) -> Vec<Action> {
+        if self.cells >= CELL_GOAL || self.index >= self.routes.len() {
+            return self.finish();
         }
         let route = self.routes[self.index].clone();
         self.index += 1;
-        self.state = State::StartInGameRoute;
-        self.state = State::Scanning;
+        self.current = Some(route.path);
+        self.menu_retries = 0;
+        self.state = State::StartRoute;
         vec![
             Action::Teleport {
                 lat: route.start_lat,
                 lon: route.start_lon,
             },
+            Action::Wait(TELEPORT_DELAY),
             Action::Press(Button::MainMenu),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::RoutesTab),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::SeeNearby),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::FirstRoute),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::Follow),
-            Action::StartGpx(route.path),
-            Action::Scan,
+            Action::Wait(CLICK_DELAY),
         ]
+    }
+
+    fn begin_complete(&mut self) -> Vec<Action> {
+        self.state = State::CompletingRoute;
+        self.menu_retries = 0;
+        vec![
+            Action::Press(Button::ActiveRoute),
+            Action::Wait(CLICK_DELAY),
+            Action::Press(Button::Complete),
+            Action::Wait(COMPLETE_WAIT),
+            Action::Press(Button::CancelCompletion),
+            Action::Wait(CLICK_DELAY),
+            Action::CheckMenu,
+        ]
+    }
+
+    fn after_route(&mut self) -> Vec<Action> {
+        self.state = State::NextRoute;
+        self.open_route()
+    }
+
+    fn finish(&mut self) -> Vec<Action> {
+        self.state = State::Finished;
+        vec![Action::Stop, Action::Exit]
     }
 }
 
 pub fn run_routes(dir: &Path) -> io::Result<()> {
     let routes = gpx::load_routes(dir)?;
-    let cell_icon =
-        Icon::load("assets/templates/zygarde_cell.png").map_err(|err| io::Error::other(err))?;
     let menu_icon =
         Icon::load("assets/templates/action_menu.png").map_err(|err| io::Error::other(err))?;
     let mut bot = Bot::new(routes);
     let mut actions = bot.start();
-    let mut moving = false;
+    let mut scan_started: Option<Instant> = None;
     let shot = Path::new(SHOT);
     loop {
         if actions.is_empty() {
+            if bot.state() == State::StartRoute {
+                actions = bot.route_opened();
+                continue;
+            }
             return Ok(());
         }
         let mut next = Vec::new();
         for action in actions {
             match action {
-                Action::Teleport { lat, lon } => {
-                    teleport_to(lat, lon)?;
-                    thread::sleep(MAP_SETTLE);
-                }
+                Action::Teleport { lat, lon } => teleport_to(lat, lon)?,
+                Action::Wait(delay) => thread::sleep(delay),
+                Action::Press(button) => press(shot, button)?,
                 Action::StartGpx(path) => {
                     clear_route_log();
                     load_and_start_gpx(&path)?;
-                    moving = false;
                 }
-                Action::Press(button) => {
-                    press(shot, button)?;
+                Action::Walk => {
+                    let mut moving = false;
+                    loop {
+                        thread::sleep(WALK_POLL);
+                        let active = route_is_active().unwrap_or(true);
+                        if active {
+                            moving = true;
+                        }
+                        if moving && !active {
+                            break;
+                        }
+                    }
+                    scan_started = None;
+                    next.extend(bot.on_arrived());
                 }
-                Action::CheckMap => {
-                    thread::sleep(MENU_PAUSE);
+                Action::ScanEnd => {
+                    let started = scan_started.get_or_insert_with(Instant::now);
                     capture(shot)?;
                     let frame = load_shot(shot)?;
-                    next.extend(bot.on_overworld(ui::overworld(&menu_icon, &frame)));
-                }
-                Action::Stop => stop()?,
-                Action::Exit => return Ok(()),
-                Action::Tap(point) => {
-                    println!("{} {}", point.x, point.y);
-                    tap(&point)?;
-                    let seen = wait_for_popup(shot, &cell_icon)?;
-                    let before = bot.cells_collected();
-                    let follow = bot.on_popup(seen);
-                    if bot.cells_collected() > before {
-                        println!("popup {}", bot.cells_collected());
+                    let timed_out = started.elapsed() >= END_SCAN;
+                    let follow = bot.on_end_scan(find_cell(&frame), timed_out);
+                    if bot.state() == State::ScanningAtEnd {
+                        thread::sleep(SCAN_POLL);
+                    } else {
+                        scan_started = None;
                     }
                     next.extend(follow);
                 }
-                Action::Scan => {
-                    thread::sleep(Duration::from_secs(1));
+                Action::Tap(point) => {
+                    println!("{} {}", point.x, point.y);
+                    tap(&point)?;
+                    let follow = bot.confirm_cell();
+                    println!("popup {}", bot.cells_collected());
+                    next.extend(follow);
+                }
+                Action::CheckMenu => {
                     capture(shot)?;
                     let frame = load_shot(shot)?;
-                    let active = route_is_active().unwrap_or(true);
-                    if active {
-                        moving = true;
-                    }
-                    let ended = moving && !active;
-                    next.extend(bot.on_frame(find_cell(&frame), !ended));
+                    next.extend(bot.on_menu(ui::action_menu_visible(&menu_icon, &frame)));
                 }
+                Action::Stop => stop()?,
+                Action::Exit => return Ok(()),
             }
         }
         actions = next;
@@ -215,28 +268,11 @@ fn press(shot: &Path, button: Button) -> io::Result<()> {
     let point = point.unwrap_or_else(|| ui::point(button, frame.width, frame.height));
     println!("{} {}", point.x, point.y);
     tap(&point)?;
-    thread::sleep(MENU_PAUSE);
     Ok(())
 }
 
 fn load_shot(path: &Path) -> io::Result<Frame> {
     Frame::load(path).map_err(|err| io::Error::other(err))
-}
-
-fn wait_for_popup(path: &Path, icon: &Icon) -> io::Result<bool> {
-    let started = Instant::now();
-    loop {
-        capture(path)?;
-        let frame = load_shot(path)?;
-        if popup::shows_cell_popup(icon, &frame) {
-            return Ok(true);
-        }
-        if started.elapsed() >= POPUP_WINDOW {
-            return Ok(false);
-        }
-        let left = POPUP_WINDOW.saturating_sub(started.elapsed());
-        thread::sleep(POPUP_POLL.min(left));
-    }
 }
 
 #[cfg(test)]
@@ -252,67 +288,108 @@ mod tests {
         }
     }
 
-    fn open_route(name: &str, lat: f64, lon: f64) -> Vec<Action> {
+    fn start_clicks(lat: f64, lon: f64) -> Vec<Action> {
         vec![
             Action::Teleport { lat, lon },
+            Action::Wait(TELEPORT_DELAY),
             Action::Press(Button::MainMenu),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::RoutesTab),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::SeeNearby),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::FirstRoute),
+            Action::Wait(CLICK_DELAY),
             Action::Press(Button::Follow),
-            Action::StartGpx(PathBuf::from(name)),
-            Action::Scan,
+            Action::Wait(CLICK_DELAY),
+        ]
+    }
+
+    fn complete_clicks() -> Vec<Action> {
+        vec![
+            Action::Press(Button::ActiveRoute),
+            Action::Wait(CLICK_DELAY),
+            Action::Press(Button::Complete),
+            Action::Wait(COMPLETE_WAIT),
+            Action::Press(Button::CancelCompletion),
+            Action::Wait(CLICK_DELAY),
+            Action::CheckMenu,
         ]
     }
 
     #[test]
-    fn starts_the_in_game_route() {
+    fn starts_the_route_before_walking() {
         let mut bot = Bot::new(vec![route("a.gpx", 48.5, 11.25)]);
-        assert_eq!(bot.start(), open_route("a.gpx", 48.5, 11.25));
-        assert_eq!(bot.state(), State::Scanning);
+        assert_eq!(bot.start(), start_clicks(48.5, 11.25));
+        assert_eq!(bot.state(), State::StartRoute);
+        assert_eq!(
+            bot.route_opened(),
+            vec![Action::StartGpx(PathBuf::from("a.gpx")), Action::Walk]
+        );
+        assert_eq!(bot.state(), State::WalkingRoute);
     }
 
     #[test]
-    fn collects_until_three_popups() {
+    fn scans_only_after_the_walk_ends() {
         let mut bot = Bot::new(vec![route("a.gpx", 1.0, 2.0)]);
         bot.start();
+        bot.route_opened();
         let point = Point { x: 10, y: 20 };
-        assert_eq!(bot.on_frame(Some(point), true), vec![Action::Tap(point)]);
-        assert_eq!(bot.state(), State::Collecting);
-        assert_eq!(bot.on_popup(false), vec![Action::Scan]);
+        assert_eq!(bot.on_arrived(), vec![Action::ScanEnd]);
+        assert_eq!(bot.state(), State::ScanningAtEnd);
+        assert_eq!(bot.on_end_scan(None, false), vec![Action::ScanEnd]);
+        assert_eq!(bot.on_end_scan(None, true), complete_clicks());
         assert_eq!(bot.cells_collected(), 0);
-        bot.on_frame(Some(point), true);
-        bot.on_popup(true);
-        bot.on_frame(Some(point), true);
-        bot.on_popup(true);
-        bot.on_frame(Some(point), true);
-        assert_eq!(bot.on_popup(true), complete_actions());
-        assert_eq!(bot.cells_collected(), 3);
-        assert_eq!(bot.state(), State::CompleteInGameRoute);
-        assert_eq!(bot.on_overworld(true), vec![Action::Stop, Action::Exit]);
-        assert_eq!(bot.state(), State::Finished);
+
+        let mut bot = Bot::new(vec![route("a.gpx", 1.0, 2.0)]);
+        bot.start();
+        bot.route_opened();
+        bot.on_arrived();
+        assert_eq!(
+            bot.on_end_scan(Some(point), false),
+            vec![Action::Tap(point)]
+        );
+        assert_eq!(bot.confirm_cell(), complete_clicks());
+        assert_eq!(bot.cells_collected(), 1);
     }
 
     #[test]
-    fn dismisses_rewards_until_the_map_returns() {
+    fn retries_cancel_until_the_menu_is_back() {
         let mut bot = Bot::new(vec![route("a.gpx", 1.0, 2.0), route("b.gpx", 3.0, 4.0)]);
         bot.start();
-        assert_eq!(bot.on_frame(None, false), complete_actions());
+        bot.route_opened();
+        bot.on_arrived();
+        bot.on_end_scan(None, true);
         assert_eq!(
-            bot.on_overworld(false),
-            vec![Action::Press(Button::Dismiss), Action::CheckMap]
+            bot.on_menu(false),
+            vec![
+                Action::Press(Button::CancelCompletion),
+                Action::Wait(CLICK_DELAY),
+                Action::CheckMenu,
+            ]
         );
-        assert_eq!(bot.state(), State::CompleteInGameRoute);
-        assert_eq!(bot.on_overworld(true), open_route("b.gpx", 3.0, 4.0));
-        assert_eq!(bot.state(), State::Scanning);
+        assert_eq!(bot.state(), State::CompletingRoute);
+        assert_eq!(bot.on_menu(true), start_clicks(3.0, 4.0));
+        assert_eq!(bot.state(), State::StartRoute);
     }
 
     #[test]
-    fn stops_when_no_routes_remain() {
-        let mut bot = Bot::new(vec![route("a.gpx", 1.0, 2.0)]);
+    fn stops_after_three_cells() {
+        let mut bot = Bot::new(vec![
+            route("a.gpx", 1.0, 2.0),
+            route("b.gpx", 3.0, 4.0),
+            route("c.gpx", 5.0, 6.0),
+        ]);
+        let point = Point { x: 4, y: 5 };
         bot.start();
-        assert_eq!(bot.on_frame(None, false), complete_actions());
-        assert_eq!(bot.on_overworld(true), vec![Action::Stop, Action::Exit]);
+        for _ in 0..3 {
+            bot.route_opened();
+            bot.on_arrived();
+            bot.on_end_scan(Some(point), false);
+            bot.confirm_cell();
+            bot.on_menu(true);
+        }
+        assert_eq!(bot.cells_collected(), 3);
         assert_eq!(bot.state(), State::Finished);
     }
 
@@ -321,14 +398,5 @@ mod tests {
         let mut bot = Bot::new(Vec::new());
         assert_eq!(bot.start(), vec![Action::Stop, Action::Exit]);
         assert_eq!(bot.state(), State::Finished);
-    }
-
-    fn complete_actions() -> Vec<Action> {
-        vec![
-            Action::Stop,
-            Action::Press(Button::RouteIcon),
-            Action::Press(Button::Complete),
-            Action::CheckMap,
-        ]
     }
 }

@@ -2,7 +2,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 const SHOT: &str = "data/frame.png";
 
@@ -73,7 +73,7 @@ fn watch(do_tap: bool) -> ExitCode {
         };
         let Some(point) = auto_zygarde::find_cell(&frame) else {
             ready = true;
-            thread::sleep(Duration::from_secs(1));
+            thread::sleep(auto_zygarde::WALK_POLL);
             continue;
         };
         if !ready {

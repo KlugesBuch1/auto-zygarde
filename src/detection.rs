@@ -2,10 +2,9 @@ use std::path::Path;
 
 use image::ImageError;
 
-const HUE_MIN: u8 = 35;
-const HUE_MAX: u8 = 85;
-const MIN_AREA: u32 = 12;
-const MAX_AREA: u32 = 20_000;
+use crate::config::{
+    GLOW_HUE_MAX, GLOW_HUE_MIN, GLOW_MAX_AREA, GLOW_MIN_AREA, GLOW_SAT_MIN, GLOW_VAL_MIN,
+};
 
 const NEIGHBORS: [(isize, isize); 8] = [
     (-1, -1),
@@ -72,7 +71,10 @@ pub fn find_cell(frame: &Frame) -> Option<Point> {
             frame.pixels[pixel + 1],
             frame.pixels[pixel + 2],
         );
-        if (HUE_MIN..=HUE_MAX).contains(&hue) && saturation > 150 && brightness > 200 {
+        if (GLOW_HUE_MIN..=GLOW_HUE_MAX).contains(&hue)
+            && saturation > GLOW_SAT_MIN
+            && brightness > GLOW_VAL_MIN
+        {
             value[i] = brightness;
         }
     }
@@ -112,7 +114,7 @@ pub fn find_cell(frame: &Frame) -> Option<Point> {
                 stack.push(next);
             }
         }
-        if blob.area < MIN_AREA || blob.area > MAX_AREA {
+        if blob.area < GLOW_MIN_AREA || blob.area > GLOW_MAX_AREA {
             continue;
         }
         let keep = match &best {
