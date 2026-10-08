@@ -1,19 +1,31 @@
 use std::env;
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn main() -> ExitCode {
     let mut args = env::args_os().skip(1);
-    let Some(path) = args.next() else {
-        eprintln!("usage: auto-zygarde <frame> [tap]");
+    let Some(first) = args.next() else {
+        eprintln!("usage: auto-zygarde <frame|capture> [tap]");
         return ExitCode::from(2);
     };
     let do_tap = match args.next() {
         None => false,
         Some(arg) if arg == "tap" => true,
         Some(_) => {
-            eprintln!("usage: auto-zygarde <frame> [tap]");
+            eprintln!("usage: auto-zygarde <frame|capture> [tap]");
             return ExitCode::from(2);
         }
+    };
+
+    let path = if first == "capture" {
+        let path = PathBuf::from("data/frame.png");
+        if let Err(err) = auto_zygarde::capture(&path) {
+            eprintln!("{err}");
+            return ExitCode::FAILURE;
+        }
+        path
+    } else {
+        PathBuf::from(first)
     };
 
     let frame = match auto_zygarde::Frame::load(&path) {
