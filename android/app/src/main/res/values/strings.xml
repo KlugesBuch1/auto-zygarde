@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">auto-zygarde</string>
+    <string name="hint">Start öffnet Pokémon GO und lässt den Bot als Root im Vordergrunddienst laufen. Das Handy bleibt entsperrt, die Karte muss sichtbar sein.</string>
+    <string name="start">Start</string>
+    <string name="stop">Stop</string>
+</resources>

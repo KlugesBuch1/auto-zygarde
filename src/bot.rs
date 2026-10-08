@@ -1,4 +1,5 @@
-use std::io;
+use std::fmt::Display;
+use std::io::{self, Write};
 use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -192,6 +193,7 @@ impl Bot {
 
 pub fn run_routes(dir: &Path) -> io::Result<()> {
     let routes = gpx::load_routes(dir)?;
+    say(format!("{} routes", routes.len()));
     let menu_icon =
         Icon::load("assets/templates/action_menu.png").map_err(|err| io::Error::other(err))?;
     let mut bot = Bot::new(routes);
@@ -231,10 +233,10 @@ pub fn run_routes(dir: &Path) -> io::Result<()> {
                     next.extend(follow);
                 }
                 Action::Tap(point) => {
-                    println!("{} {}", point.x, point.y);
+                    say(format!("{} {}", point.x, point.y));
                     tap(&point)?;
                     let follow = bot.confirm_cell();
-                    println!("popup {}", bot.cells_collected());
+                    say(format!("popup {}", bot.cells_collected()));
                     next.extend(follow);
                 }
                 Action::CheckMenu => {
@@ -242,7 +244,10 @@ pub fn run_routes(dir: &Path) -> io::Result<()> {
                     let frame = load_shot(shot)?;
                     next.extend(bot.on_menu(ui::action_menu_visible(&menu_icon, &frame)));
                 }
-                Action::ZoomOut => ensure_zoomed_out()?,
+                Action::ZoomOut => {
+                    say("zoom out");
+                    ensure_zoomed_out()?;
+                }
                 Action::Stop => stop()?,
                 Action::Exit => return Ok(()),
             }
@@ -259,9 +264,14 @@ fn press(shot: &Path, button: Button) -> io::Result<()> {
         crate::ocr::find_text_in_region(&frame, label, spot.roi(frame.width, frame.height))
     });
     let point = point.unwrap_or_else(|| ui::point(button, frame.width, frame.height));
-    println!("{} {}", point.x, point.y);
+    say(format!("{} {}", point.x, point.y));
     tap(&point)?;
     Ok(())
+}
+
+fn say(line: impl Display) {
+    println!("{line}");
+    let _ = std::io::stdout().flush();
 }
 
 fn load_shot(path: &Path) -> io::Result<Frame> {
