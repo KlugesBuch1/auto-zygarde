@@ -15,6 +15,7 @@ pub const COMPLETE_WAIT: Duration = Duration::from_secs(5);
 pub const END_SCAN: Duration = Duration::from_secs(7);
 pub const SCAN_POLL: Duration = Duration::from_millis(300);
 pub const WALK_POLL: Duration = Duration::from_secs(1);
+pub const WAYPOINT_PAUSE: Duration = Duration::from_millis(400);
 
 pub const POPUP_GOAL: u32 = CELL_GOAL;
 pub const POPUP_WINDOW: Duration = Duration::from_secs(2);

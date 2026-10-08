@@ -1,13 +1,11 @@
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::config::{CLICK_DELAY, COMPLETE_WAIT, END_SCAN, SCAN_POLL, TELEPORT_DELAY, WALK_POLL};
+use crate::config::{CLICK_DELAY, COMPLETE_WAIT, END_SCAN, SCAN_POLL, TELEPORT_DELAY};
 use crate::gpx::{self, GpxRoute};
-use crate::mock_location::{
-    clear_route_log, load_and_start_gpx, route_is_active, stop, teleport_to,
-};
+use crate::mock_location::{stop, teleport_route_waypoints, teleport_to};
 use crate::popup::Icon;
 use crate::ui::{self, Button};
 use crate::{Frame, Point, capture, find_cell, tap};
@@ -19,7 +17,7 @@ const CELL_GOAL: u32 = crate::config::CELL_GOAL;
 pub enum State {
     Idle,
     StartRoute,
-    WalkingRoute,
+    TeleportingRoute,
     ScanningAtEnd,
     Collecting,
     CompletingRoute,
@@ -32,8 +30,7 @@ pub enum Action {
     Teleport { lat: f64, lon: f64 },
     Wait(Duration),
     Press(Button),
-    StartGpx(PathBuf),
-    Walk,
+    TeleportWaypoints(Vec<(f64, f64)>),
     ScanEnd,
     Tap(Point),
     CheckMenu,
@@ -46,7 +43,7 @@ pub struct Bot {
     index: usize,
     cells: u32,
     state: State,
-    current: Option<PathBuf>,
+    waypoints: Vec<(f64, f64)>,
     menu_retries: u8,
 }
 
@@ -57,7 +54,7 @@ impl Bot {
             index: 0,
             cells: 0,
             state: State::Idle,
-            current: None,
+            waypoints: Vec::new(),
             menu_retries: 0,
         }
     }
@@ -79,15 +76,15 @@ impl Bot {
         if self.state != State::StartRoute {
             return Vec::new();
         }
-        let Some(path) = self.current.clone() else {
+        if self.waypoints.is_empty() {
             return self.finish();
-        };
-        self.state = State::WalkingRoute;
-        vec![Action::StartGpx(path), Action::Walk]
+        }
+        self.state = State::TeleportingRoute;
+        vec![Action::TeleportWaypoints(self.waypoints.clone())]
     }
 
     pub fn on_arrived(&mut self) -> Vec<Action> {
-        if self.state != State::WalkingRoute {
+        if self.state != State::TeleportingRoute {
             return Vec::new();
         }
         self.state = State::ScanningAtEnd;
@@ -137,7 +134,7 @@ impl Bot {
         }
         let route = self.routes[self.index].clone();
         self.index += 1;
-        self.current = Some(route.path);
+        self.waypoints = route.points;
         self.menu_retries = 0;
         self.state = State::StartRoute;
         vec![
@@ -206,22 +203,8 @@ pub fn run_routes(dir: &Path) -> io::Result<()> {
                 Action::Teleport { lat, lon } => teleport_to(lat, lon)?,
                 Action::Wait(delay) => thread::sleep(delay),
                 Action::Press(button) => press(shot, button)?,
-                Action::StartGpx(path) => {
-                    clear_route_log();
-                    load_and_start_gpx(&path)?;
-                }
-                Action::Walk => {
-                    let mut moving = false;
-                    loop {
-                        thread::sleep(WALK_POLL);
-                        let active = route_is_active().unwrap_or(true);
-                        if active {
-                            moving = true;
-                        }
-                        if moving && !active {
-                            break;
-                        }
-                    }
+                Action::TeleportWaypoints(points) => {
+                    teleport_route_waypoints(&points)?;
                     scan_started = None;
                     next.extend(bot.on_arrived());
                 }
@@ -277,14 +260,21 @@ fn load_shot(path: &Path) -> io::Result<Frame> {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
 
     fn route(name: &str, lat: f64, lon: f64) -> GpxRoute {
+        route_points(name, vec![(lat, lon)])
+    }
+
+    fn route_points(name: &str, points: Vec<(f64, f64)>) -> GpxRoute {
+        let (start_lat, start_lon) = points[0];
         GpxRoute {
             path: PathBuf::from(name),
-            start_lat: lat,
-            start_lon: lon,
-            points: vec![(lat, lon)],
+            start_lat,
+            start_lon,
+            points,
         }
     }
 
@@ -318,19 +308,17 @@ mod tests {
     }
 
     #[test]
-    fn starts_the_route_before_walking() {
-        let mut bot = Bot::new(vec![route("a.gpx", 48.5, 11.25)]);
+    fn starts_the_route_before_teleporting() {
+        let points = vec![(48.5, 11.25), (48.6, 11.3)];
+        let mut bot = Bot::new(vec![route_points("a.gpx", points.clone())]);
         assert_eq!(bot.start(), start_clicks(48.5, 11.25));
         assert_eq!(bot.state(), State::StartRoute);
-        assert_eq!(
-            bot.route_opened(),
-            vec![Action::StartGpx(PathBuf::from("a.gpx")), Action::Walk]
-        );
-        assert_eq!(bot.state(), State::WalkingRoute);
+        assert_eq!(bot.route_opened(), vec![Action::TeleportWaypoints(points)]);
+        assert_eq!(bot.state(), State::TeleportingRoute);
     }
 
     #[test]
-    fn scans_only_after_the_walk_ends() {
+    fn scans_only_after_the_last_waypoint() {
         let mut bot = Bot::new(vec![route("a.gpx", 1.0, 2.0)]);
         bot.start();
         bot.route_opened();

@@ -1,11 +1,32 @@
 use std::io;
 use std::path::Path;
 use std::process::Command;
+use std::thread;
+use std::time::Duration;
 
+use crate::config::WAYPOINT_PAUSE;
 use crate::gpx::{self, GpxRoute};
 
 pub fn teleport_to(lat: f64, lon: f64) -> io::Result<()> {
     finish(teleport_command(lat, lon), "teleport")
+}
+
+pub fn teleport_route_waypoints(waypoints: &[(f64, f64)]) -> io::Result<()> {
+    hop_waypoints(waypoints, WAYPOINT_PAUSE, teleport_to)
+}
+
+fn hop_waypoints(
+    waypoints: &[(f64, f64)],
+    pause: Duration,
+    mut hop: impl FnMut(f64, f64) -> io::Result<()>,
+) -> io::Result<()> {
+    for (index, &(lat, lon)) in waypoints.iter().enumerate() {
+        if index > 0 {
+            thread::sleep(pause);
+        }
+        hop(lat, lon)?;
+    }
+    Ok(())
 }
 
 pub fn load_and_start_gpx(path: &Path) -> io::Result<()> {
@@ -15,22 +36,6 @@ pub fn load_and_start_gpx(path: &Path) -> io::Result<()> {
 
 pub fn stop() -> io::Result<()> {
     finish(stop_command(), "stop")
-}
-
-pub fn route_is_active() -> io::Result<bool> {
-    let status = status_command().status()?;
-    if !status.success() {
-        return Err(io::Error::other(format!("status exited with {status}")));
-    }
-    let Ok(output) = Command::new("logcat").args(["-d", "-t", "100"]).output() else {
-        return Ok(true);
-    };
-    let text = String::from_utf8_lossy(&output.stdout);
-    Ok(route_active_from_log(&text).unwrap_or(true))
-}
-
-pub fn clear_route_log() {
-    let _ = Command::new("logcat").arg("-c").status();
 }
 
 fn read_route(path: &Path) -> io::Result<GpxRoute> {
@@ -94,16 +99,6 @@ fn stop_command() -> Command {
     command
 }
 
-fn status_command() -> Command {
-    let mut command = Command::new("am");
-    command.args([
-        "start-foreground-service",
-        "-a",
-        "theappninjas.gpsjoystick.STATUS",
-    ]);
-    command
-}
-
 fn finish(mut command: Command, name: &str) -> io::Result<()> {
     let status = command.status()?;
     if status.success() {
@@ -111,25 +106,6 @@ fn finish(mut command: Command, name: &str) -> io::Result<()> {
     } else {
         Err(io::Error::other(format!("{name} exited with {status}")))
     }
-}
-
-pub(crate) fn route_active_from_log(text: &str) -> Option<bool> {
-    let mut found = None;
-    for line in text.lines() {
-        let Some(rest) = line.split("is_route_active=").nth(1) else {
-            continue;
-        };
-        let token = rest
-            .split(|ch: char| !ch.is_ascii_alphanumeric())
-            .next()
-            .unwrap_or("");
-        if token.eq_ignore_ascii_case("true") || token == "1" {
-            found = Some(true);
-        } else if token.eq_ignore_ascii_case("false") || token == "0" {
-            found = Some(false);
-        }
-    }
-    found
 }
 
 #[cfg(test)]
@@ -169,9 +145,18 @@ mod tests {
     }
 
     #[test]
-    fn reads_latest_route_flag() {
-        let text = "is_route_active=true\nis_route_active=false\n";
-        assert_eq!(route_active_from_log(text), Some(false));
-        assert_eq!(route_active_from_log("idle"), None);
+    fn hops_waypoints_in_order() {
+        let mut seen = Vec::new();
+        hop_waypoints(
+            &[(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)],
+            Duration::ZERO,
+            |lat, lon| {
+                seen.push((lat, lon));
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, vec![(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)]);
+        assert!(hop_waypoints(&[], Duration::ZERO, |_, _| unreachable!()).is_ok());
     }
 }
