@@ -1,5 +1,5 @@
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
@@ -39,8 +39,9 @@ pub fn stop() -> io::Result<()> {
 }
 
 const ZOOM_PINCHES: usize = 5;
-const ZOOM_SWIPE_MS: u32 = 300;
-const ZOOM_PINCH_GAP: Duration = Duration::from_millis(200);
+const ZOOM_PINCH_MS: u32 = 450;
+const ZOOM_PINCH_GAP: Duration = Duration::from_millis(300);
+const ZOOM_JAR: &[u8] = include_bytes!("../assets/zoom/zoomout.jar");
 
 #[derive(Clone, Copy)]
 struct Pinch {
@@ -52,14 +53,24 @@ struct Pinch {
 }
 
 pub fn ensure_zoomed_out() -> io::Result<()> {
+    let jar = write_zoom_jar()?;
     let (width, height) = display_size()?;
     for (index, pinch) in zoom_out_pinches(width, height).iter().enumerate() {
         if index > 0 {
             thread::sleep(ZOOM_PINCH_GAP);
         }
-        run_pinch(pinch)?;
+        finish(zoom_out_command(&jar, pinch), "zoom out")?;
     }
     Ok(())
+}
+
+fn write_zoom_jar() -> io::Result<PathBuf> {
+    let path = PathBuf::from("data/zoomout.jar");
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(&path, ZOOM_JAR)?;
+    std::fs::canonicalize(&path).or(Ok(path))
 }
 
 fn display_size() -> io::Result<(u32, u32)> {
@@ -119,7 +130,7 @@ fn zoom_out_pinches(width: u32, height: u32) -> Vec<Pinch> {
             screen_axis(cx + dx * 0.15, width),
             screen_axis(cy + dy * 0.15, height),
         ),
-        duration_ms: ZOOM_SWIPE_MS,
+        duration_ms: ZOOM_PINCH_MS,
     };
     vec![pinch; ZOOM_PINCHES]
 }
@@ -131,44 +142,26 @@ fn screen_axis(value: f32, limit: u32) -> u32 {
     value.round().clamp(0.0, (limit - 1) as f32) as u32
 }
 
-fn run_pinch(pinch: &Pinch) -> io::Result<()> {
-    let mut inward_a = swipe_command(
+fn zoom_out_command(jar: &Path, pinch: &Pinch) -> Command {
+    let jar = jar.to_string_lossy().into_owned();
+    let mut command = Command::new("app_process");
+    command.env("CLASSPATH", &jar);
+    command.arg(format!("-Djava.class.path={jar}"));
+    command.arg("/");
+    command.arg("com.autozygarde.ZoomOut");
+    for value in [
         pinch.from_a.0,
         pinch.from_a.1,
-        pinch.to_a.0,
-        pinch.to_a.1,
-        pinch.duration_ms,
-    );
-    let mut inward_b = swipe_command(
         pinch.from_b.0,
         pinch.from_b.1,
+        pinch.to_a.0,
+        pinch.to_a.1,
         pinch.to_b.0,
         pinch.to_b.1,
-        pinch.duration_ms,
-    );
-    let mut inward_a = inward_a.spawn()?;
-    let mut inward_b = inward_b.spawn()?;
-    let status_a = inward_a.wait()?;
-    let status_b = inward_b.wait()?;
-    if status_a.success() && status_b.success() {
-        Ok(())
-    } else {
-        Err(io::Error::other(format!(
-            "zoom out exited with {status_a} and {status_b}"
-        )))
+    ] {
+        command.arg(value.to_string());
     }
-}
-
-fn swipe_command(x1: u32, y1: u32, x2: u32, y2: u32, duration_ms: u32) -> Command {
-    let mut command = Command::new("input");
-    command.args([
-        "swipe",
-        &x1.to_string(),
-        &y1.to_string(),
-        &x2.to_string(),
-        &y2.to_string(),
-        &duration_ms.to_string(),
-    ]);
+    command.arg(pinch.duration_ms.to_string());
     command
 }
 
@@ -307,22 +300,30 @@ mod tests {
     }
 
     #[test]
-    fn zoom_out_pinch_is_an_inward_swipe() {
+    fn zoom_out_pinch_is_one_two_finger_gesture() {
         let pinches = zoom_out_pinches(1080, 2400);
         assert_eq!(pinches.len(), ZOOM_PINCHES);
         let pinch = pinches[0];
-        assert!(pinch.from_a.0 < pinch.to_a.0);
-        assert!(pinch.from_a.1 < pinch.to_a.1);
-        assert!(pinch.from_b.0 > pinch.to_b.0);
-        assert!(pinch.from_b.1 > pinch.to_b.1);
-        let command = swipe_command(
-            pinch.from_a.0,
-            pinch.from_a.1,
-            pinch.to_a.0,
-            pinch.to_a.1,
-            pinch.duration_ms,
+        let start = span(pinch.from_a, pinch.from_b);
+        let end = span(pinch.to_a, pinch.to_b);
+        assert!(
+            end < start * 0.5,
+            "fingers must move together so the map zooms out"
         );
-        assert_eq!(command.get_program(), "input");
+        let start_center = midpoint(pinch.from_a, pinch.from_b);
+        let end_center = midpoint(pinch.to_a, pinch.to_b);
+        assert!((start_center.0 - end_center.0).abs() < 2.0);
+        assert!((start_center.1 - end_center.1).abs() < 2.0);
+
+        let jar = Path::new("data/zoomout.jar");
+        let command = zoom_out_command(jar, &pinch);
+        assert_eq!(command.get_program(), "app_process");
+        let classpath = command
+            .get_envs()
+            .find(|(key, _)| *key == "CLASSPATH")
+            .and_then(|(_, value)| value)
+            .map(|value| value.to_string_lossy().into_owned());
+        assert_eq!(classpath.as_deref(), Some("data/zoomout.jar"));
         let args: Vec<_> = command
             .get_args()
             .map(|arg| arg.to_string_lossy().into_owned())
@@ -330,13 +331,42 @@ mod tests {
         assert_eq!(
             args,
             vec![
-                "swipe".to_string(),
+                "-Djava.class.path=data/zoomout.jar".to_string(),
+                "/".to_string(),
+                "com.autozygarde.ZoomOut".to_string(),
                 pinch.from_a.0.to_string(),
                 pinch.from_a.1.to_string(),
+                pinch.from_b.0.to_string(),
+                pinch.from_b.1.to_string(),
                 pinch.to_a.0.to_string(),
                 pinch.to_a.1.to_string(),
+                pinch.to_b.0.to_string(),
+                pinch.to_b.1.to_string(),
                 pinch.duration_ms.to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn zoom_out_jar_contains_a_dex() {
+        assert_eq!(&ZOOM_JAR[..4], b"PK\x03\x04");
+        assert!(
+            ZOOM_JAR
+                .windows(b"classes.dex".len())
+                .any(|window| window == b"classes.dex")
+        );
+    }
+
+    fn span(a: (u32, u32), b: (u32, u32)) -> f32 {
+        let dx = a.0 as f32 - b.0 as f32;
+        let dy = a.1 as f32 - b.1 as f32;
+        (dx * dx + dy * dy).sqrt()
+    }
+
+    fn midpoint(a: (u32, u32), b: (u32, u32)) -> (f32, f32) {
+        (
+            (a.0 as f32 + b.0 as f32) / 2.0,
+            (a.1 as f32 + b.1 as f32) / 2.0,
+        )
     }
 }
