@@ -55,13 +55,17 @@ impl Route {
 }
 
 pub fn shows_cell_popup(icon: &Icon, frame: &Frame) -> bool {
-    let Some(band) = top_luma(frame) else {
-        return false;
-    };
-    matches(&icon, &band, &SCALES, MIN_SIMILARITY)
+    shows_icon_rows(icon, frame, 0.0, TOP)
 }
 
-fn top_luma(frame: &Frame) -> Option<Template> {
+pub fn shows_icon_rows(icon: &Icon, frame: &Frame, from_y: f32, to_y: f32) -> bool {
+    let Some(band) = band_luma(frame, from_y, to_y) else {
+        return false;
+    };
+    matches(icon, &band, &SCALES, MIN_SIMILARITY)
+}
+
+fn band_luma(frame: &Frame, from_y: f32, to_y: f32) -> Option<Template> {
     let width = frame.width;
     let height = frame.height;
     if width == 0 || height == 0 {
@@ -73,10 +77,14 @@ fn top_luma(frame: &Frame) -> Option<Template> {
     if frame.pixels.len() != expected {
         return None;
     }
-    let rows = ((height as f32) * TOP).ceil() as u32;
-    let rows = rows.clamp(1, height);
+    let y0 = ((height as f32) * from_y).floor() as u32;
+    let y1 = ((height as f32) * to_y).ceil() as u32;
+    let y0 = y0.min(height - 1);
+    let y1 = y1.clamp(y0 + 1, height);
+    let rows = y1 - y0;
+    let start = (y0 as usize) * (width as usize) * 3;
     let bytes = (width as usize) * (rows as usize) * 3;
-    let rgb = image::RgbImage::from_raw(width, rows, frame.pixels[..bytes].to_vec())?;
+    let rgb = image::RgbImage::from_raw(width, rows, frame.pixels[start..start + bytes].to_vec())?;
     let gray = image::DynamicImage::ImageRgb8(rgb).into_luma8();
     Some(Template {
         width: gray.width(),
