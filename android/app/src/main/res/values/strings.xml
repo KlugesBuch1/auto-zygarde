@@ -1,7 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">auto-zygarde</string>
-    <string name="hint">Start opens Pokémon GO and runs the bot as root in a foreground service. Keep the phone unlocked with the map on screen.</string>
+    <string name="hint">Open GPS Joystick first and leave its overlay on. Start then opens Pokémon GO and runs the bot.</string>
+    <string name="open_joystick">Open GPS Joystick</string>
+    <string name="joystick_missing">GPS Joystick is not installed.</string>
     <string name="start">Start</string>
     <string name="stop">Stop</string>
 </resources>

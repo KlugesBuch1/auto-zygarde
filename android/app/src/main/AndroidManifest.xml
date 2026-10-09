@@ -7,6 +7,10 @@
 
     <queries>
         <package android:name="com.nianticlabs.pokemongo" />
+        <package android:name="com.theappninjas.gpsjoystick" />
+        <intent>
+            <action android:name="theappninjas.gpsjoystick.TELEPORT" />
+        </intent>
     </queries>
 
     <application
